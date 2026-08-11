@@ -15,7 +15,7 @@ permissions:
 jobs:
   govulncheck:
     name: govulncheck
-    runs-on: ubuntu-latest
+    runs-on: arc-runner-set
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -31,7 +31,7 @@ jobs:
 
   test:
     name: Run Tests
-    runs-on: ubuntu-latest
+    runs-on: arc-runner-set
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -107,7 +107,7 @@ jobs:
     # with `needs` does not implicitly require success(), so it must be
     # listed explicitly here.
     if: success() && github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
-    runs-on: ubuntu-latest
+    runs-on: arc-runner-set
     permissions:
       contents: write
     steps:
