@@ -1,0 +1,55 @@
+name: Bug report
+description: Report a reproducible bug in scherry
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Please include enough detail for maintainers to reproduce the issue.
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the bug and what you expected instead.
+      placeholder: When I call RegisterManual with ...
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Minimal code, configuration, or commands that trigger the issue.
+      placeholder: |
+        1. Configure scherry with ...
+        2. Register job ...
+        3. Trigger ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: scherry version
+      description: Module version or git commit SHA.
+      placeholder: v1.0.0 or commit abc1234
+    validations:
+      required: true
+  - type: input
+    id: go-version
+    attributes:
+      label: Go version
+      placeholder: go1.25.12
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: PostgreSQL, Redis, and Kafka versions or managed service details if relevant.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or stack traces
+      description: Redact secrets before posting.
+      render: shell

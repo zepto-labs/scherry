@@ -1,0 +1,13 @@
+# Binaries built with go build
+/payroll
+/examples/payroll/payroll
+
+# Go test/coverage artifacts
+*.test
+*.out
+/test-results/
+
+# OS/editor noise
+.DS_Store
+.idea/
+.vscode/

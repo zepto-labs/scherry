@@ -1,0 +1,815 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Job Scheduler Console</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32' fill='none'><rect x='2' y='2' width='28' height='28' rx='8' fill='%235b8cff'/><circle cx='16' cy='16' r='8.5' fill='none' stroke='%23fff' stroke-width='2'/><path d='M16 11.3V16l3.2 2.1' fill='none' stroke='%23fff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/></svg>">
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --panel-2: #1e222b; --border: #2a2f3a;
+    --text: #e6e8ec; --muted: #9aa3b2; --accent: #5b8cff;
+    --ok: #3fb950; --run: #d29922; --fail: #f85149; --pend: #6e7681; --cancel: #8957e5;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+         background: var(--bg); color: var(--text); }
+  header { display: flex; align-items: center; gap: 12px; padding: 12px 18px;
+           border-bottom: 1px solid var(--border); background: var(--panel); position: sticky; top: 0; z-index: 8; }
+  header h1 { font-size: 22px; margin: 0; font-weight: 700; letter-spacing: -.01em; }
+  header .brand { display: flex; align-items: center; gap: 10px; }
+  header .brand svg { width: 30px; height: 30px; display: block; }
+  header .spacer { flex: 1; }
+  .hamburger { background: transparent; border: none; padding: 6px; margin-right: 2px; cursor: pointer;
+               color: var(--text); display: inline-flex; border-radius: 6px; }
+  .hamburger:hover { background: var(--panel-2); }
+  .hamburger svg { width: 22px; height: 22px; }
+  .muted { color: var(--muted); }
+  /* layout: collapsible left sidebar + content */
+  .layout { display: flex; align-items: stretch; }
+  .sidebar { flex: 0 0 212px; width: 212px; background: var(--panel); border-right: 1px solid var(--border);
+             padding: 12px 10px; min-height: calc(100vh - 57px); }
+  .sidebar.hidden { display: none; }
+  .sidebar nav { display: flex; flex-direction: column; gap: 3px; position: sticky; top: 69px; }
+  .sidebar nav button { display: flex; align-items: center; gap: 11px; width: 100%; text-align: left;
+                        background: transparent; border: none; color: var(--muted); font: inherit;
+                        padding: 9px 12px; border-radius: 8px; cursor: pointer; }
+  .sidebar nav button:hover { background: var(--panel-2); color: var(--text); }
+  .sidebar nav button.active { background: rgba(91,140,255,.14); color: var(--text); font-weight: 600; }
+  .sidebar nav button svg { width: 18px; height: 18px; flex: 0 0 18px; }
+  .content { flex: 1; min-width: 0; }
+  .filters { display: flex; gap: 10px; flex-wrap: wrap; padding: 14px 20px; align-items: end; }
+  .field { display: flex; flex-direction: column; gap: 4px; }
+  .field label { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  select, input, button { background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+           border-radius: 6px; padding: 6px 10px; font: inherit; }
+  button { cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.danger { background: rgba(248,81,73,.15); border-color: var(--fail); color: var(--fail); }
+  button:disabled { opacity: .5; cursor: default; }
+  button.mini { padding: 2px 8px; font-size: 12px; }
+  label.check { flex-direction: row; align-items: center; gap: 6px; text-transform: none; color: var(--text); font-size: 13px; }
+  main { padding: 0 20px 40px; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  th { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); font-weight: 600; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tbody tr.clickable { cursor: pointer; }
+  tbody tr.clickable:hover { background: var(--panel); }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+  .st-COMPLETED { background: rgba(63,185,80,.16); color: var(--ok); }
+  .st-RUNNING { background: rgba(210,153,34,.16); color: var(--run); }
+  .st-FAILED, .st-MAX_RETRIES_EXHAUSTED { background: rgba(248,81,73,.16); color: var(--fail); }
+  .st-PENDING { background: rgba(110,118,129,.2); color: #b6bec9; }
+  .st-PARTIAL_FAILED { background: rgba(210,153,34,.16); color: var(--run); }
+  .st-CANCELLED, .st-REJECTED { background: rgba(137,87,229,.16); color: var(--cancel); }
+  .yes { background: rgba(63,185,80,.16); color: var(--ok); }
+  .no { background: rgba(110,118,129,.2); color: #b6bec9; }
+  .bar { position: relative; height: 8px; width: 140px; background: var(--panel-2); border-radius: 999px; overflow: hidden; }
+  .bar > i { position: absolute; top: 0; left: 0; height: 100%; }
+  .bar .b-ok { background: var(--ok); }
+  .bar .b-fail { background: var(--fail); }
+  .bar .b-run { background: var(--run); }
+  .prog-label { font-size: 12px; color: var(--muted); margin-top: 3px; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  .warn { color: var(--fail); font-size: 12px; }
+  /* charts */
+  .chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 980px) { .chart-grid { grid-template-columns: 1fr; } }
+  .chart-card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; margin: 14px 0; }
+  .chart-card .chead { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+  .chart-card h2 { font-size: 13px; margin: 0; }
+  .chart-card .cap { font-size: 12px; color: var(--muted); }
+  .chart-card select { padding: 4px 8px; font-size: 12px; }
+  svg.chart { display: block; width: 100%; }
+  svg.chart .grid { stroke: var(--border); stroke-width: 1; }
+  svg.chart .axis { fill: var(--muted); font-size: 11px; }
+  svg.chart .total { fill: var(--text); font-size: 11px; font-weight: 600; }
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; padding: 8px 2px 2px; color: var(--muted); font-size: 12px; }
+  .legend .leg { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; }
+  .legend .leg i { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+  .legend .leg.off { opacity: .45; text-decoration: line-through; }
+  .legend .leg.off i { filter: grayscale(1); }
+  .chart-tip { position: absolute; z-index: 50; background: var(--panel-2); border: 1px solid var(--border);
+               border-radius: 6px; padding: 6px 8px; font-size: 12px; color: var(--text); pointer-events: none;
+               box-shadow: 0 4px 12px rgba(0,0,0,.4); display: none; }
+  /* drawer */
+  .drawer-bg { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: none; z-index: 10; }
+  .drawer-bg.open { display: block; }
+  .drawer { position: fixed; top: 0; right: 0; height: 100%; width: min(720px, 92vw);
+            background: var(--panel); border-left: 1px solid var(--border); overflow-y: auto;
+            transform: translateX(100%); transition: transform .18s ease; z-index: 11; }
+  .drawer.open { transform: translateX(0); }
+  .drawer .dhead { display: flex; align-items: center; gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--border);
+                   position: sticky; top: 0; background: var(--panel); }
+  .drawer .dbody { padding: 16px 20px; }
+  .kv { display: grid; grid-template-columns: 130px 1fr; gap: 4px 12px; margin-bottom: 18px; }
+  .kv div:nth-child(odd) { color: var(--muted); }
+  h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 20px 0 8px; }
+  pre { background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px;
+        overflow-x: auto; font-size: 12px; margin: 0; max-height: 240px; }
+  details summary { cursor: pointer; color: var(--accent); font-size: 12px; }
+  .empty { padding: 40px; text-align: center; color: var(--muted); }
+  .close { margin-left: auto; }
+  .lineage a { color: var(--accent); cursor: pointer; text-decoration: none; }
+</style>
+</head>
+<body>
+<header>
+  <button class="hamburger" id="hamburger" title="Toggle menu" aria-label="Toggle menu">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+  </button>
+  <div class="brand">
+    <svg viewBox="0 0 32 32" fill="none">
+      <rect x="2" y="2" width="28" height="28" rx="8" fill="#5b8cff"/>
+      <circle cx="16" cy="16" r="8.5" fill="none" stroke="#fff" stroke-width="2"/>
+      <path d="M16 11.3V16l3.2 2.1" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    <h1>Scherry Console</h1>
+  </div>
+  <span class="muted" id="count"></span>
+  <div class="spacer"></div>
+  <label class="check field"><input type="checkbox" id="auto" checked> Auto-refresh</label>
+</header>
+
+<div class="layout">
+<aside class="sidebar" id="sidebar">
+  <nav>
+    <button data-tab="overview" class="active">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>
+      <span>Overview</span>
+    </button>
+    <button data-tab="history">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l3 2"/></svg>
+      <span>History</span>
+    </button>
+    <button data-tab="jobs">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+      <span>Jobs</span>
+    </button>
+    <button data-tab="upcoming">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+      <span>Upcoming</span>
+    </button>
+  </nav>
+</aside>
+<div class="content">
+
+<!-- ===== Overview (charts + metrics) ===== -->
+<section id="view-overview">
+  <div class="filters">
+    <div class="field">
+      <label for="ov-range">Range</label>
+      <select id="ov-range">
+        <option value="1">Last 1h</option>
+        <option value="24" selected>Last 24h</option>
+        <option value="168">Last 7d</option>
+        <option value="720">Last 30d</option>
+      </select>
+    </div>
+    <div class="field"><label>&nbsp;</label><button class="primary" id="ov-refresh">Refresh</button></div>
+  </div>
+  <main>
+    <div class="chart-grid">
+      <div class="chart-card">
+        <div class="chead"><h2>Job executions by status</h2></div>
+        <div class="cap">Job runs in range, stacked by execution status.</div>
+        <div id="chart-bars"></div>
+      </div>
+      <div class="chart-card">
+        <div class="chead">
+          <h2>Tasks over time</h2>
+          <select id="ts-job"><option value="">All jobs</option></select>
+        </div>
+        <div class="cap" id="ts-caption">Task outcomes per time bucket.</div>
+        <div id="chart-lines"></div>
+      </div>
+    </div>
+
+    <div class="chart-card">
+      <div class="chead"><h2>Jobs</h2></div>
+      <table>
+        <thead><tr>
+          <th>Job name</th><th class="num">Next run in</th><th class="num">Avg time</th>
+          <th class="num">Success</th><th class="num">Error</th><th class="num">Error %</th>
+        </tr></thead>
+        <tbody id="metric-rows"></tbody>
+      </table>
+      <div class="empty" id="metric-empty" style="display:none">No jobs registered.</div>
+    </div>
+  </main>
+</section>
+
+<!-- ===== History ===== -->
+<section id="view-history" hidden>
+  <div class="filters">
+    <div class="field">
+      <label for="f-name">Job</label>
+      <select id="f-name"><option value="">All jobs</option></select>
+    </div>
+    <div class="field">
+      <label for="f-status">Status</label>
+      <select id="f-status"><option value="">All statuses</option></select>
+    </div>
+    <div class="field">
+      <label for="f-refid">Reference ID</label>
+      <input type="text" id="f-refid" placeholder="Exact refID" spellcheck="false" autocomplete="off">
+    </div>
+    <div class="field">
+      <label for="f-limit">Page size</label>
+      <select id="f-limit"><option>25</option><option selected>50</option><option>100</option><option>200</option></select>
+    </div>
+    <div class="field"><label>&nbsp;</label><button class="primary" id="refresh">Refresh</button></div>
+    <div class="field"><label>&nbsp;</label>
+      <span><button id="prev">‹ Prev</button> <button id="next">Next ›</button></span>
+    </div>
+  </div>
+  <main>
+    <table>
+      <thead><tr>
+        <th>Job</th><th>Status</th><th>Progress</th><th>Started</th><th>Duration</th><th>Created</th>
+      </tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div class="empty" id="empty" style="display:none">No jobs found.</div>
+  </main>
+</section>
+
+<!-- ===== Configured jobs ===== -->
+<section id="view-jobs" hidden>
+  <main>
+    <table>
+      <thead><tr>
+        <th>Job</th><th>Schedule</th><th>Enabled</th><th>Max retries</th><th>Cancel prev</th>
+        <th>Task topic</th><th>Retry topic</th><th>DLQ topic</th><th>Consumer group</th><th>Brokers</th>
+      </tr></thead>
+      <tbody id="cfg-rows"></tbody>
+    </table>
+    <div class="empty" id="cfg-empty" style="display:none">No jobs registered.</div>
+  </main>
+</section>
+
+<!-- ===== Upcoming runs ===== -->
+<section id="view-upcoming" hidden>
+  <div class="filters">
+    <div class="field">
+      <label for="u-count">Runs per job</label>
+      <select id="u-count"><option>3</option><option selected>5</option><option>10</option><option>20</option></select>
+    </div>
+    <div class="field"><label>&nbsp;</label><button class="primary" id="u-refresh">Refresh</button></div>
+  </div>
+  <main>
+    <table>
+      <thead><tr><th>Runs in</th><th>Run at</th><th>Job</th><th>Schedule</th></tr></thead>
+      <tbody id="up-rows"></tbody>
+    </table>
+    <div class="empty" id="up-empty" style="display:none">No upcoming runs (check schedules parse).</div>
+  </main>
+</section>
+</div><!-- .content -->
+</div><!-- .layout -->
+
+<div class="drawer-bg" id="drawer-bg"></div>
+<aside class="drawer" id="drawer">
+  <div class="dhead">
+    <strong id="d-title">Job</strong>
+    <span id="d-badge"></span>
+    <button class="close" id="d-close">Close</button>
+  </div>
+  <div class="dbody" id="d-body"></div>
+</aside>
+
+<script>
+const $ = s => document.querySelector(s);
+let offset = 0, timer = null, activeTab = 'overview', jobFilter = '';
+
+/* task status values for the drawer filter */
+const TASK_STATUSES = ['PENDING','RUNNING','COMPLETED','FAILED','MAX_RETRIES_EXHAUSTED','CANCELLED','REJECTED'];
+
+/* drawer task-pagination state (reset on each openDrawer call) */
+let drawerTaskOffset = 0, drawerTaskStatus = '', drawerTaskLimit = 25;
+
+/* job execution statuses: fixed stack order + validated colors */
+const JOB_STATUS_ORDER = ['PENDING','RUNNING','COMPLETED','PARTIAL_FAILED','FAILED','CANCELLED','REJECTED'];
+const JOB_STATUS_COLOR = {
+  PENDING:'#6e7681', RUNNING:'#c98500', COMPLETED:'#2f9e44', PARTIAL_FAILED:'#d95926',
+  FAILED:'#f85149', CANCELLED:'#8957e5', REJECTED:'#d55181'
+};
+/* task time-series outcomes */
+const OUTCOME = [['succeeded','Succeeded','#2f9e44'],['failed','Failed','#f85149'],['other','Other','#6e7681']];
+const SVGNS = 'http://www.w3.org/2000/svg';
+
+/* toggle state + last data (so legend clicks re-render without refetch) */
+const barHidden = new Set(), tsHidden = new Set();
+let lastBars = [], lastTs = { buckets: [], unit: 'hour' };
+
+const fmtDur = ms => {
+  if (ms == null || ms === 0) return '—';
+  if (ms < 1000) return Math.round(ms) + ' ms';
+  const s = ms / 1000;
+  if (s < 60) return s.toFixed(1) + ' s';
+  const m = Math.floor(s / 60), r = Math.round(s % 60);
+  return m + 'm ' + r + 's';
+};
+const fmtTime = t => t ? new Date(t).toLocaleString() : '—';
+const fmtRelative = t => {
+  if (!t) return '—';
+  const diff = new Date(t) - Date.now();
+  if (diff <= 0) return 'now';
+  const s = Math.round(diff / 1000);
+  if (s < 60) return s + 's';
+  const m = Math.floor(s / 60);
+  if (m < 60) return m + 'm ' + (s % 60) + 's';
+  const h = Math.floor(m / 60);
+  if (h < 24) return h + 'h ' + (m % 60) + 'm';
+  return Math.floor(h / 24) + 'd ' + (h % 24) + 'h';
+};
+const fmtBucket = (t, unit) => {
+  const d = new Date(t);
+  if (unit === 'day') return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  if (unit === 'hour') return d.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit' });
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+};
+const badge = st => `<span class="badge st-${st}">${st}</span>`;
+const yesNo = b => b ? '<span class="badge yes">yes</span>' : '<span class="badge no">no</span>';
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
+
+/* ---------- SVG + tooltip + legend helpers ---------- */
+function mk(tag, attrs, parent) {
+  const e = document.createElementNS(SVGNS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+let tipEl;
+function showTip(html, ev) {
+  if (!tipEl) { tipEl = document.createElement('div'); tipEl.className = 'chart-tip'; document.body.appendChild(tipEl); }
+  tipEl.innerHTML = html;
+  tipEl.style.display = 'block';
+  tipEl.style.left = (ev.pageX + 12) + 'px';
+  tipEl.style.top = (ev.pageY + 12) + 'px';
+}
+function hideTip() { if (tipEl) tipEl.style.display = 'none'; }
+// items: [[key, label, color], ...]; clicking toggles key in `hidden` and re-renders.
+function legendEl(items, hidden, onToggle) {
+  const d = document.createElement('div');
+  d.className = 'legend';
+  items.forEach(([key, label, color]) => {
+    const s = document.createElement('span');
+    s.className = 'leg' + (hidden.has(key) ? ' off' : '');
+    s.innerHTML = `<i style="background:${color}"></i>${esc(label)}`;
+    s.onclick = () => { hidden.has(key) ? hidden.delete(key) : hidden.add(key); onToggle(); };
+    d.appendChild(s);
+  });
+  return d;
+}
+
+/* ---------- job executions: stacked bars ---------- */
+function renderJobBars(el, rows) {
+  el.innerHTML = '';
+  const byName = new Map();
+  (rows || []).forEach(r => {
+    if (!byName.has(r.name)) byName.set(r.name, {});
+    byName.get(r.name)[r.status] = r.count;
+  });
+  const names = [...byName.keys()];
+  if (!names.length) { el.innerHTML = '<div class="empty">No job executions in range.</div>'; return; }
+
+  const visible = st => !barHidden.has(st);
+  const totalOf = n => JOB_STATUS_ORDER.filter(visible).reduce((s, st) => s + (byName.get(n)[st] || 0), 0);
+  const totals = names.map(totalOf);
+  const maxTotal = Math.max(1, ...totals);
+
+  const W = el.clientWidth || 460, H = 300, padL = 40, padR = 12, padT = 20, padB = 58;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const svg = mk('svg', { class: 'chart', width: W, height: H, viewBox: `0 0 ${W} ${H}` }, el);
+  const yOf = v => padT + plotH - plotH * v / maxTotal;
+
+  const ticks = 4;
+  for (let i = 0; i <= ticks; i++) {
+    const v = Math.round(maxTotal * i / ticks), y = yOf(v);
+    mk('line', { class: 'grid', x1: padL, y1: y, x2: W - padR, y2: y }, svg);
+    mk('text', { class: 'axis', x: padL - 6, y: y + 3, 'text-anchor': 'end' }, svg).textContent = v;
+  }
+
+  const slot = plotW / names.length;
+  const bw = Math.max(8, Math.min(slot * 0.72, plotW / Math.max(names.length, 4) * 0.6));
+  names.forEach((name, idx) => {
+    const cx = padL + slot * idx + slot / 2, x = cx - bw / 2;
+    const data = byName.get(name);
+    const present = JOB_STATUS_ORDER.filter(st => visible(st) && data[st]);
+    let cum = 0;
+    present.forEach((st, si) => {
+      const val = data[st], y0 = yOf(cum), y1 = yOf(cum + val);
+      cum += val;
+      const rect = mk('rect', {
+        x, y: y1, width: bw, height: Math.max(0, y0 - y1 - (si > 0 ? 2 : 0)),
+        fill: JOB_STATUS_COLOR[st] || '#888', rx: si === present.length - 1 ? 4 : 0
+      }, svg);
+      const tip = ev => showTip(`<b>${esc(name)}</b><br>${esc(st)}: ${val}`, ev);
+      rect.addEventListener('mouseenter', tip);
+      rect.addEventListener('mousemove', tip);
+      rect.addEventListener('mouseleave', hideTip);
+    });
+    mk('text', { class: 'total', x: cx, y: yOf(totals[idx]) - 6, 'text-anchor': 'middle' }, svg).textContent = totals[idx];
+    const xl = mk('text', { class: 'axis', x: cx, y: H - padB + 18, 'text-anchor': 'middle' }, svg);
+    xl.textContent = name.length > 14 ? name.slice(0, 13) + '…' : name;
+    mk('title', {}, xl).textContent = name;
+  });
+
+  const presentAll = JOB_STATUS_ORDER.filter(st => (rows || []).some(r => r.status === st && r.count > 0));
+  el.appendChild(legendEl(presentAll.map(st => [st, st, JOB_STATUS_COLOR[st] || '#888']), barHidden,
+    () => renderJobBars(el, lastBars)));
+}
+
+/* ---------- tasks over time: line chart ---------- */
+function renderLines(el, buckets, unit) {
+  el.innerHTML = '';
+  buckets = buckets || [];
+  if (!buckets.length) { el.innerHTML = '<div class="empty">No tasks in range.</div>'; return; }
+
+  const shown = OUTCOME.filter(([k]) => !tsHidden.has(k));
+  const visMax = Math.max(1, ...buckets.flatMap(b => shown.map(([k]) => b[k])));
+
+  const W = el.clientWidth || 460, H = 300, padL = 40, padR = 12, padT = 14, padB = 40;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const svg = mk('svg', { class: 'chart', width: W, height: H, viewBox: `0 0 ${W} ${H}` }, el);
+  const n = buckets.length;
+  const xOf = i => n === 1 ? padL + plotW / 2 : padL + plotW * i / (n - 1);
+  const yOf = v => padT + plotH - plotH * v / visMax;
+
+  const ticks = 4;
+  for (let i = 0; i <= ticks; i++) {
+    const v = Math.round(visMax * i / ticks), y = yOf(v);
+    mk('line', { class: 'grid', x1: padL, y1: y, x2: W - padR, y2: y }, svg);
+    mk('text', { class: 'axis', x: padL - 6, y: y + 3, 'text-anchor': 'end' }, svg).textContent = v;
+  }
+
+  shown.forEach(([k, , color]) => {
+    let d = '';
+    buckets.forEach((b, i) => { d += (i ? ' L ' : 'M ') + xOf(i) + ' ' + yOf(b[k]); });
+    mk('path', { d, fill: 'none', stroke: color, 'stroke-width': 2, 'stroke-linejoin': 'round' }, svg);
+    if (n <= 40) buckets.forEach((b, i) => mk('circle', { cx: xOf(i), cy: yOf(b[k]), r: 2.5, fill: color }, svg));
+  });
+
+  [...new Set([0, Math.floor((n - 1) / 2), n - 1])].forEach(i => {
+    const anchor = i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle';
+    mk('text', { class: 'axis', x: xOf(i), y: H - padB + 16, 'text-anchor': anchor }, svg).textContent = fmtBucket(buckets[i].t, unit);
+  });
+
+  const cross = mk('line', { class: 'grid', y1: padT, y2: padT + plotH, visibility: 'hidden' }, svg);
+  const overlay = mk('rect', { x: padL, y: padT, width: plotW, height: plotH, fill: 'transparent' }, svg);
+  overlay.addEventListener('mousemove', ev => {
+    const r = svg.getBoundingClientRect();
+    const mx = (ev.clientX - r.left) * (W / r.width);
+    let i = n === 1 ? 0 : Math.round((mx - padL) / (plotW / (n - 1)));
+    i = Math.max(0, Math.min(n - 1, i));
+    const bx = xOf(i);
+    cross.setAttribute('x1', bx); cross.setAttribute('x2', bx); cross.setAttribute('visibility', 'visible');
+    const b = buckets[i];
+    const lines = shown.map(([k, label]) => `${label} ${b[k]}`).join(' · ');
+    showTip(`<b>${fmtBucket(b.t, unit)}</b><br>${lines || '—'}`, ev);
+  });
+  overlay.addEventListener('mouseleave', () => { cross.setAttribute('visibility', 'hidden'); hideTip(); });
+
+  el.appendChild(legendEl(OUTCOME, tsHidden, () => renderLines(el, lastTs.buckets, lastTs.unit)));
+}
+
+/* ---------- Overview data ---------- */
+const rangeHours = () => +$('#ov-range').value;
+const rangeFrom = () => new Date(Date.now() - rangeHours() * 3600e3).toISOString();
+
+async function loadStats() {
+  const from = rangeFrom();
+  try {
+    const j = await fetch('api/stats/jobs?from=' + encodeURIComponent(from)).then(r => r.json());
+    lastBars = j.counts || [];
+    renderJobBars($('#chart-bars'), lastBars);
+  } catch {}
+  await loadTimeseries(from);
+  await loadMetrics(from);
+}
+async function loadTimeseries(from) {
+  from = from || rangeFrom();
+  const p = new URLSearchParams({ from });
+  if (jobFilter) p.set('job', jobFilter);
+  try {
+    const ts = await fetch('api/stats/timeseries?' + p).then(r => r.json());
+    lastTs = { buckets: ts.buckets || [], unit: ts.bucket || 'hour' };
+    renderLines($('#chart-lines'), lastTs.buckets, lastTs.unit);
+  } catch {}
+}
+async function loadMetrics(from) {
+  from = from || rangeFrom();
+  let data;
+  try { data = await fetch('api/stats/job-metrics?from=' + encodeURIComponent(from)).then(r => r.json()); }
+  catch { return; }
+  const jobs = data.jobs || [];
+  $('#metric-empty').style.display = jobs.length ? 'none' : 'block';
+  $('#metric-rows').innerHTML = jobs.map(j => `
+    <tr>
+      <td>${esc(j.name)}</td>
+      <td class="num">${fmtRelative(j.next_run)}</td>
+      <td class="num">${fmtDur(j.avg_ms)}</td>
+      <td class="num">${j.success}</td>
+      <td class="num">${j.error}</td>
+      <td class="num">${j.error_pct.toFixed(1)}%</td>
+    </tr>`).join('');
+}
+
+/* ---------- tabs ---------- */
+function switchTab(tab) {
+  activeTab = tab;
+  document.querySelectorAll('#sidebar nav button').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  $('#view-overview').hidden = tab !== 'overview';
+  $('#view-history').hidden = tab !== 'history';
+  $('#view-jobs').hidden = tab !== 'jobs';
+  $('#view-upcoming').hidden = tab !== 'upcoming';
+  $('#count').textContent = '';
+  refreshActive();
+}
+function refreshActive() {
+  if (activeTab === 'overview') loadStats();
+  else if (activeTab === 'history') loadJobs();
+  else if (activeTab === 'jobs') loadConfig();
+  else if (activeTab === 'upcoming') loadUpcoming();
+}
+
+/* ---------- History ---------- */
+async function loadMeta() {
+  const m = await fetch('api/jobs/meta').then(r => r.json());
+  const names = (m.job_names || []).sort();
+  names.forEach(n => $('#f-name').insertAdjacentHTML('beforeend', `<option>${esc(n)}</option>`));
+  names.forEach(n => $('#ts-job').insertAdjacentHTML('beforeend', `<option>${esc(n)}</option>`));
+  (m.all_statuses || []).forEach(s => $('#f-status').insertAdjacentHTML('beforeend', `<option>${esc(s)}</option>`));
+}
+function query() {
+  const p = new URLSearchParams();
+  if ($('#f-name').value) p.set('name', $('#f-name').value);
+  if ($('#f-status').value) p.set('status', $('#f-status').value);
+  if ($('#f-refid').value.trim()) p.set('ref_id', $('#f-refid').value.trim());
+  p.set('limit', $('#f-limit').value);
+  p.set('offset', offset);
+  return p.toString();
+}
+async function loadJobs() {
+  let data;
+  try { data = await fetch('api/jobs?' + query()).then(r => r.json()); }
+  catch { return; }
+  const jobs = data.jobs || [];
+  $('#count').textContent = jobs.length ? `showing ${offset + 1}–${offset + jobs.length}` : '';
+  $('#empty').style.display = jobs.length ? 'none' : 'block';
+  $('#prev').disabled = offset === 0;
+  $('#next').disabled = jobs.length < data.limit;
+  $('#rows').innerHTML = jobs.map(j => `
+    <tr class="clickable" data-id="${esc(j.id)}">
+      <td><div>${esc(j.name)}${j.source === 'asynq' ? ' <span class="muted">(asynq)</span>' : ''}</div><div class="mono muted">${j.id.slice(0,8)}</div></td>
+      <td>${badge(j.status)}</td>
+      <td>${progressBar(j.progress, j)}</td>
+      <td class="muted">${fmtTime(j.started_at)}</td>
+      <td>${fmtDur(j.duration_ms)}</td>
+      <td class="muted">${fmtTime(j.created_at)}</td>
+    </tr>`).join('');
+  document.querySelectorAll('#rows tr').forEach(tr => tr.onclick = () => openDrawer(tr.dataset.id));
+}
+function progressBar(p, job) {
+  const total = p.total || 0;
+  if (!total) {
+    const err = job && job.metadata && job.metadata.error;
+    if (err) return `<span class="muted" title="${esc(err)}">trigger failed</span>`;
+    if (job && job.source === 'asynq') return '<span class="muted">asynq trigger</span>';
+    return '<span class="muted">no tasks</span>';
+  }
+  const pct = k => (p[k] / total * 100).toFixed(1) + '%';
+  const done = p.completed + p.failed;
+  return `<div class="bar" title="${p.completed} ok · ${p.failed} failed · ${p.running} running · ${p.pending} pending">
+      <i class="b-ok" style="width:${pct('completed')};left:0"></i>
+      <i class="b-fail" style="width:${pct('failed')};left:${p.completed/total*100}%"></i>
+      <i class="b-run" style="width:${pct('running')};left:${(p.completed+p.failed)/total*100}%"></i>
+    </div><div class="prog-label">${done}/${total} done</div>`;
+}
+
+/* ---------- Configured jobs ---------- */
+async function loadConfig() {
+  let data;
+  try { data = await fetch('api/config').then(r => r.json()); }
+  catch { return; }
+  const jobs = data.jobs || [];
+  $('#count').textContent = jobs.length ? `${jobs.length} registered` : '';
+  $('#cfg-empty').style.display = jobs.length ? 'none' : 'block';
+  $('#cfg-rows').innerHTML = jobs.map(j => `
+    <tr>
+      <td>${esc(j.name)}${j.parse_error ? `<div class="warn">bad schedule: ${esc(j.parse_error)}</div>` : ''}</td>
+      <td class="mono">${esc(j.schedule)}</td>
+      <td>${yesNo(j.enabled)}</td>
+      <td>${j.max_retries}</td>
+      <td>${yesNo(j.cancel_previous)}</td>
+      <td class="mono">${esc(j.task_topic)}</td>
+      <td class="mono">${esc(j.task_retry_topic) || '—'}</td>
+      <td class="mono">${esc(j.task_dlq_topic) || '—'}</td>
+      <td class="mono">${esc(j.consumer_group)}</td>
+      <td class="mono muted">${(j.brokers || []).map(esc).join(', ')}</td>
+    </tr>`).join('');
+}
+
+/* ---------- Upcoming runs ---------- */
+async function loadUpcoming() {
+  let data;
+  try { data = await fetch('api/upcoming?count=' + $('#u-count').value).then(r => r.json()); }
+  catch { return; }
+  const runs = data.runs || [];
+  $('#count').textContent = runs.length ? `${runs.length} upcoming` : '';
+  $('#up-empty').style.display = runs.length ? 'none' : 'block';
+  $('#up-rows').innerHTML = runs.map(r => `
+    <tr>
+      <td>${fmtRelative(r.run_at)}</td>
+      <td>${fmtTime(r.run_at)}</td>
+      <td>${esc(r.job_name)}</td>
+      <td class="mono muted">${esc(r.schedule)}</td>
+    </tr>`).join('');
+}
+
+/* ---------- shared helper ---------- */
+const jsonBlock = (label, v) => v == null ? '' :
+  `<details><summary>${label}</summary><pre>${esc(JSON.stringify(v, null, 2))}</pre></details>`;
+
+/* ---------- History drawer ---------- */
+
+/* Fetches one page of tasks and re-renders the task section inside the drawer. */
+async function loadDrawerTasks(id) {
+  const p = new URLSearchParams({ limit: drawerTaskLimit, offset: drawerTaskOffset });
+  if (drawerTaskStatus) p.set('status', drawerTaskStatus);
+  let td;
+  try { td = await fetch(`api/jobs/${id}/tasks?${p}`).then(r => r.json()); }
+  catch { return; }
+
+  const tasks   = td.tasks  || [];
+  const total   = td.total  || 0;
+  const end     = drawerTaskOffset + tasks.length;
+  const countEl = document.getElementById('dt-count');
+  const prevEl  = document.getElementById('dt-prev');
+  const nextEl  = document.getElementById('dt-next');
+  const wrapEl  = document.getElementById('dt-wrap');
+  if (!wrapEl) return;
+
+  if (countEl) countEl.textContent = total ? `${drawerTaskOffset + 1}–${end} of ${total}` : 'no tasks';
+  if (prevEl)  prevEl.disabled  = drawerTaskOffset === 0;
+  if (nextEl)  nextEl.disabled  = end >= total;
+
+  if (!tasks.length) {
+    wrapEl.innerHTML = '<div class="empty">No tasks match the filter.</div>';
+    return;
+  }
+
+  wrapEl.innerHTML = `<table><thead><tr>
+      <th class="num">#</th><th>Name</th><th>Status</th><th>Attempt</th><th>Duration</th><th>Params</th><th>Result</th>
+    </tr></thead>
+    <tbody>${tasks.map(t => `<tr>
+      <td class="num mono muted">${t.sequence_number}</td>
+      <td>${esc(t.name)}<div class="mono muted">${t.id.slice(0,8)}</div></td>
+      <td>${badge(t.status)}</td>
+      <td class="mono">${t.attempt}/${t.max_retries}</td>
+      <td>${fmtDur(t.duration_ms)}</td>
+      <td>${t.params ? jsonBlock('params', t.params) : '—'}</td>
+      <td>${t.result ? jsonBlock('result', t.result) : '—'}</td>
+    </tr>`).join('')}</tbody></table>`;
+}
+
+async function openDrawer(id) {
+  /* reset task pagination every time a new job is opened */
+  drawerTaskOffset = 0;
+  drawerTaskStatus = '';
+
+  const d = await fetch('api/jobs/' + id).then(r => r.json());
+  const j = d.job;
+  $('#d-title').textContent = j.name;
+  $('#d-badge').innerHTML = badge(j.status);
+
+  const lineage = (d.lineage || []).length
+    ? `<h3>Retry lineage</h3><div class="lineage">` + d.lineage.map(l =>
+        `<div><a data-id="${l.id}">${l.id.slice(0,8)}</a> ${badge(l.status)}
+         <span class="muted">${fmtTime(l.created_at)}</span></div>`).join('') + `</div>`
+    : '';
+  const canRetry = j.source === 'asynq' ||
+    ['COMPLETED','FAILED','PARTIAL_FAILED','CANCELLED','REJECTED'].includes(j.status);
+  const canTerminate = j.source !== 'asynq' && ['PENDING','RUNNING'].includes(j.status);
+  const sourceLine = j.source === 'asynq'
+    ? `<div>Source</div><div>Asynq trigger <span class="muted">(${esc((j.metadata && j.metadata.asynq_state) || 'unknown')})</span></div>`
+    : '';
+
+  $('#d-body').innerHTML = `
+    <div class="kv">
+      <div>Job ID</div><div class="mono">${esc(j.id)}</div>
+      <div>Reference</div><div class="mono">${esc(j.unique_reference_id) || '—'}</div>
+      <div>Parent</div><div class="mono">${j.parent_job_id || '—'}</div>
+      <div>Started</div><div>${fmtTime(j.started_at)}</div>
+      <div>Finished</div><div>${fmtTime(j.finished_at)}</div>
+      <div>Duration</div><div>${fmtDur(j.duration_ms)}</div>
+      ${sourceLine}
+    </div>
+    ${jsonBlock('Metadata', j.metadata)}
+    <div style="margin:14px 0">
+      ${j.source !== 'asynq' ? '<label class="check"><input type="checkbox" id="full-retry"> full retry (re-run all tasks)</label>' : ''}
+      <button class="primary" id="retry-btn" ${canRetry ? '' : 'disabled'} style="margin-left:8px">Retry job</button>
+      <button class="danger" id="terminate-btn" ${canTerminate ? '' : 'disabled'} style="margin-left:8px">Terminate job</button>
+      <span id="action-msg" class="muted"></span>
+    </div>
+    ${lineage}
+    <h3>Tasks</h3>
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+      <div class="field">
+        <label for="dt-status">Status</label>
+        <select id="dt-status">
+          <option value="">All statuses</option>
+          ${TASK_STATUSES.map(s => `<option value="${s}">${esc(s)}</option>`).join('')}
+        </select>
+      </div>
+      <span id="dt-count" class="muted" style="font-size:12px"></span>
+      <button id="dt-prev" class="mini">‹ Prev</button>
+      <button id="dt-next" class="mini">Next ›</button>
+    </div>
+    <div id="dt-wrap"></div>`;
+
+  document.querySelectorAll('#d-body .lineage a').forEach(a => a.onclick = () => openDrawer(a.dataset.id));
+
+  const retryBtn = document.getElementById('retry-btn');
+  if (retryBtn) retryBtn.onclick = async () => {
+    retryBtn.disabled = true;
+    const full = document.getElementById('full-retry').checked;
+    try {
+      const res = await fetch(`api/jobs/${encodeURIComponent(id)}/retry?full=${full}`, { method: 'POST' }).then(r => r.json());
+      document.getElementById('action-msg').textContent = res.error ? ('error: ' + res.error)
+        : res.retried ? (`retried via ${res.retry_method || 'job'}${res.cloned_job_id ? ' → ' + res.cloned_job_id.slice(0,8) : ''}`) : 'nothing to retry';
+      loadJobs();
+    } catch { document.getElementById('action-msg').textContent = 'request failed'; retryBtn.disabled = false; }
+  };
+
+  const terminateBtn = document.getElementById('terminate-btn');
+  if (terminateBtn) terminateBtn.onclick = async () => {
+    if (!confirm('Terminate this job? Pending tasks will be cancelled.')) return;
+    terminateBtn.disabled = true;
+    try {
+      const res = await fetch(`api/jobs/${id}/terminate`, { method: 'POST' }).then(r => r.json());
+      document.getElementById('action-msg').textContent = res.error ? ('error: ' + res.error) : 'job terminated';
+      loadJobs();
+      openDrawer(id);
+    } catch { document.getElementById('action-msg').textContent = 'request failed'; terminateBtn.disabled = false; }
+  };
+
+  const dtStatus = document.getElementById('dt-status');
+  const dtPrev   = document.getElementById('dt-prev');
+  const dtNext   = document.getElementById('dt-next');
+  if (dtStatus) dtStatus.onchange = () => {
+    drawerTaskOffset = 0; drawerTaskStatus = dtStatus.value; loadDrawerTasks(id);
+  };
+  if (dtPrev) dtPrev.onclick = () => {
+    drawerTaskOffset = Math.max(0, drawerTaskOffset - drawerTaskLimit); loadDrawerTasks(id);
+  };
+  if (dtNext) dtNext.onclick = () => { drawerTaskOffset += drawerTaskLimit; loadDrawerTasks(id); };
+
+  await loadDrawerTasks(id);
+
+  $('#drawer').classList.add('open');
+  $('#drawer-bg').classList.add('open');
+}
+function closeDrawer() { $('#drawer').classList.remove('open'); $('#drawer-bg').classList.remove('open'); }
+
+/* ---------- events ---------- */
+document.querySelectorAll('#sidebar nav button').forEach(b => b.onclick = () => switchTab(b.dataset.tab));
+$('#hamburger').onclick = () => $('#sidebar').classList.toggle('hidden');
+$('#ov-refresh').onclick = loadStats;
+$('#ov-range').onchange = loadStats;
+$('#ts-job').onchange = () => { jobFilter = $('#ts-job').value; loadTimeseries(); };
+$('#refresh').onclick = () => { offset = 0; loadJobs(); };
+$('#f-name').onchange = () => { offset = 0; loadJobs(); };
+$('#f-status').onchange = () => { offset = 0; loadJobs(); };
+$('#f-refid').addEventListener('input', debounce(() => { offset = 0; loadJobs(); }, 300));
+$('#f-limit').onchange = () => { offset = 0; loadJobs(); };
+$('#prev').onclick = () => { offset = Math.max(0, offset - +$('#f-limit').value); loadJobs(); };
+$('#next').onclick = () => { offset += +$('#f-limit').value; loadJobs(); };
+$('#u-refresh').onclick = loadUpcoming;
+$('#u-count').onchange = loadUpcoming;
+$('#d-close').onclick = closeDrawer;
+$('#drawer-bg').onclick = closeDrawer;
+$('#auto').onchange = e => setAuto(e.target.checked);
+
+let resizeTimer;
+window.addEventListener('resize', () => {
+  if (activeTab !== 'overview') return;
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => {
+    renderJobBars($('#chart-bars'), lastBars);
+    renderLines($('#chart-lines'), lastTs.buckets, lastTs.unit);
+  }, 200);
+});
+
+function setAuto(on) {
+  if (timer) { clearInterval(timer); timer = null; }
+  if (on) timer = setInterval(() => { if (!$('#drawer').classList.contains('open')) refreshActive(); }, 5000);
+}
+
+(async () => { await loadMeta(); switchTab('overview'); setAuto(true); })();
+</script>
+</body>
+</html>
