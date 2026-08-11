@@ -27,7 +27,7 @@ jobs:
           cache: true
 
       - name: Run govulncheck
-        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
 
   test:
     name: Run Tests
@@ -43,7 +43,7 @@ jobs:
           cache: true
 
       - name: Install gotestsum
-        run: go install gotest.tools/gotestsum@latest
+        run: go install gotest.tools/gotestsum@v1.13.0
 
       - name: Run tests
         run: |
@@ -62,11 +62,25 @@ jobs:
             echo "coverage.out missing; skipping report generation"
             exit 0
           fi
-          python3 scripts/generate_pr_coverage_report.py \
-            --coverprofile=coverage.out \
-            --junit=test-results/report.xml \
-            --output=coverage-report.md \
+          REPORT_ARGS=(
+            --coverprofile=coverage.out
+            --junit=test-results/report.xml
+            --output=coverage-report.md
             --commit="${{ github.sha }}"
+          )
+          if [ "${{ github.event.pull_request.head.repo.full_name }}" != "${{ github.repository }}" ]; then
+            REPORT_ARGS+=(--summary-only)
+          else
+            git fetch origin "${{ github.event.pull_request.base.ref }}" --depth=1
+            git ls-tree -r --name-only "origin/${{ github.event.pull_request.base.ref }}" -- internal/ \
+              | grep '\.go$' \
+              | grep -v '/testutil/' \
+              | grep -v '/examples/' \
+              | xargs -n1 dirname \
+              | sort -u > trusted-packages.txt
+            REPORT_ARGS+=(--allowed-packages-file trusted-packages.txt)
+          fi
+          python3 scripts/generate_pr_coverage_report.py "${REPORT_ARGS[@]}"
 
       - name: Post coverage report to PR
         if: github.event_name == 'pull_request' && always()

@@ -127,11 +127,64 @@ def coverage_badge(pct: float) -> str:
     return "🔴"
 
 
+def load_allowed_packages(path: Path | None) -> set[str] | None:
+    if path is None:
+        return None
+    if not path.is_file():
+        return set()
+    allowed = {line.strip() for line in path.read_text().splitlines() if line.strip()}
+    return allowed
+
+
+def filter_packages(
+    packages: dict[str, PackageCoverage],
+    suites: dict[str, TestSuite],
+    allowed: set[str] | None,
+) -> tuple[dict[str, PackageCoverage], dict[str, TestSuite], int]:
+    if allowed is None:
+        return packages, suites, 0
+    filtered_pkgs = {k: v for k, v in packages.items() if k in allowed}
+    filtered_suites = {k: v for k, v in suites.items() if k in allowed}
+    omitted = len(packages) - len(filtered_pkgs)
+    return filtered_pkgs, filtered_suites, omitted
+
+
+def render_summary_report(
+    suites: dict[str, TestSuite],
+    total_pct: float,
+    commit: str,
+) -> str:
+    total_tests = sum(s.tests for s in suites.values())
+    total_failures = sum(s.failures for s in suites.values())
+    total_errors = sum(s.errors for s in suites.values())
+    passed = total_failures == 0 and total_errors == 0
+    status = "✅ passed" if passed else "❌ failed"
+
+    lines: list[str] = [
+        "<!-- coverage-pr-report -->",
+        "## Test & Coverage Report",
+        "",
+        "| | |",
+        "|---|---|",
+        f"| **Commit** | `{commit}` |",
+        f"| **Total coverage** | {coverage_badge(total_pct)} **{fmt_pct(total_pct)}** |",
+        f"| **Tests** | {status} — {total_tests} run, "
+        f"{total_failures} failed, {total_errors} errors |",
+        f"| **Scope** | `internal/*` excluding `testutil` and `examples` |",
+        "",
+        "_Per-package breakdown omitted for fork PRs._",
+        "",
+    ]
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def render_report(
     packages: dict[str, PackageCoverage],
     suites: dict[str, TestSuite],
     total_pct: float,
     commit: str,
+    *,
+    omitted_packages: int = 0,
 ) -> str:
     lines: list[str] = [
         "<!-- coverage-pr-report -->",
@@ -142,10 +195,21 @@ def render_report(
         f"| **Commit** | `{commit}` |",
         f"| **Total coverage** | {coverage_badge(total_pct)} **{fmt_pct(total_pct)}** |",
         f"| **Scope** | `internal/*` excluding `testutil` and `examples` |",
-        "",
-        "| Package / File | Tests | Failed | Errors | Time (s) | Coverage | Stmts |",
-        "|----------------|------:|-------:|-------:|---------:|----------|------:|",
     ]
+    if omitted_packages:
+        lines.extend(
+            [
+                f"| **Packages shown** | trusted packages on base branch "
+                f"({omitted_packages} omitted) |",
+            ]
+        )
+    lines.extend(
+        [
+            "",
+            "| Package / File | Tests | Failed | Errors | Time (s) | Coverage | Stmts |",
+            "|----------------|------:|-------:|-------:|---------:|----------|------:|",
+        ]
+    )
 
     total_tests = total_failures = total_errors = 0
     total_time = 0.0
@@ -198,6 +262,17 @@ def main() -> int:
     parser.add_argument("--junit", default="test-results/report.xml", type=Path)
     parser.add_argument("--output", default="coverage-report.md", type=Path)
     parser.add_argument("--commit", default="unknown", type=str)
+    parser.add_argument(
+        "--allowed-packages-file",
+        type=Path,
+        default=None,
+        help="Only list packages present in this file (one path per line, e.g. internal/scheduler)",
+    )
+    parser.add_argument(
+        "--summary-only",
+        action="store_true",
+        help="Post total coverage and pass/fail only; omit per-package breakdown",
+    )
     args = parser.parse_args()
 
     if not args.coverprofile.is_file():
@@ -215,7 +290,14 @@ def main() -> int:
     if args.junit.is_file():
         suites = parse_junit(args.junit)
 
-    report = render_report(packages, suites, total_pct, args.commit)
+    if args.summary_only:
+        report = render_summary_report(suites, total_pct, args.commit)
+    else:
+        allowed = load_allowed_packages(args.allowed_packages_file)
+        packages, suites, omitted = filter_packages(packages, suites, allowed)
+        report = render_report(
+            packages, suites, total_pct, args.commit, omitted_packages=omitted
+        )
     args.output.write_text(report)
     print(report)
     return 0
