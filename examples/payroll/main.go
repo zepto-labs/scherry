@@ -49,7 +49,7 @@ func main() {
 		Name:              payrollJobName,
 		JobExecutor:       &payrollBatchJobExecutor{store: store, batchSize: 2, logger: logger},
 		TaskExecutor:      &payrollPayoutTaskExecutor{store: store, logger: logger},
-		Schedule:          "* * * * *",
+		Schedule:          "*/10 * * * *",
 		JobCompletionCron: "* * * * *",
 		AsynqOptions: []asynq.Option{
 			asynq.MaxRetry(3),
