@@ -71,7 +71,7 @@ docker compose down -v
 
 ### `POST /bonus/trigger`
 
-Fires a `bonus_payout_job` run. Each call generates a unique `ref_id` for idempotency.
+Fires a `bonus_payout_job` run. Each call generates a fresh random `ref_id`, so every request starts a new run. To have a retried request reuse the existing run instead, pass a stable business key as the `ref_id` — note that this deduplication is best-effort and does not protect against two overlapping requests.
 
 **Request body:**
 ```json

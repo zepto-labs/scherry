@@ -15,7 +15,13 @@ import (
 
 // ExecuteJob runs jobName's JobExecutor, persists the resulting job and
 // tasks, and publishes them to Kafka. jobs is the caller's full registered-job
-// map; refID is the idempotency key used to detect an already-executed job.
+// map; refID is the deduplication key used to detect an already-executed job.
+//
+// Deduplication is best-effort, not an idempotency guarantee: the existence
+// check and the insert are separate statements and unique_reference_id has no
+// unique constraint, so calls sharing a refID that overlap in time can each
+// create a run. Callers that cannot tolerate a duplicate run must make the
+// effect itself idempotent.
 func ExecuteJob(ctx context.Context, repo repository.Repository, logger logging.Logger, jobs map[string]jobconfig.JobConfig, jobName, refID string, metadata map[string]interface{}) error {
 	d := &deps{repo: repo, logger: logger, jobs: jobs}
 	return d.executeJob(ctx, jobName, refID, metadata)

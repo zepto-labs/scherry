@@ -471,7 +471,7 @@ func (s *Service) FindJobByID(ctx context.Context, jobID uuid.UUID) (*domain.Job
 }
 
 // RegisterRetryHandler registers an Asynq handler for retryJobType that
-// invokes RetryJob using the Asynq task ID as the idempotency ref.
+// invokes RetryJob using the Asynq task ID as the deduplication ref.
 func (s *Service) RegisterRetryHandler(mux *asynq.ServeMux, retryJobType string) {
 	executor.RegisterRetryHandler(mux, retryJobType, s.repository, s.logger, s.jobs)
 }

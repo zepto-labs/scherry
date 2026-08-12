@@ -29,7 +29,11 @@ CREATE INDEX idx_scherry_jobs_status ON scherry_jobs (status);
 -- Retry lineage: FindPendingJobByParentID and jobLineage.
 CREATE INDEX idx_scherry_parent_job_id ON scherry_jobs (parent_job_id);
 
--- Idempotent job submission: WHERE unique_reference_id = ?
+-- Duplicate-run lookup on job submission: WHERE unique_reference_id = ?
+-- Deliberately not UNIQUE: a unique index on a partitioned table must include
+-- every partition key column, so UNIQUE (unique_reference_id) is not creatable
+-- here and UNIQUE (unique_reference_id, created_at) would not prevent duplicates.
+-- Deduplication is therefore best-effort and duplicate values can exist.
 CREATE INDEX idx_scherry_jobs_unique_reference_id ON scherry_jobs (unique_reference_id);
 
 -- Console job list ordering (newest-first).
