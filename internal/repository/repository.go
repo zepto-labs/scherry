@@ -98,11 +98,14 @@ func (r *repository) FindTaskWithJob(ctx context.Context, taskID uuid.UUID) (*do
 }
 
 func (r *repository) FindJobWithTasksByUniqueReferenceID(ctx context.Context, uniqueReferenceID string) (*domain.Job, []domain.Task, error) {
-	// Two-phase lookup: fetch the job row first (hits the unique_reference_id index,
-	// returns at most one row), then fetch its tasks only when a duplicate is found.
-	// The previous single LEFT JOIN returned all T task rows unconditionally, which
-	// at large T (e.g. 100k tasks) loaded the full task set just for an idempotency
-	// check that in the common case (no duplicate) returns nothing.
+	// Two-phase lookup: fetch the job row first (hits the unique_reference_id index),
+	// then fetch its tasks only when a duplicate is found. The previous single LEFT
+	// JOIN returned all T task rows unconditionally, which at large T (e.g. 100k
+	// tasks) loaded the full task set just for a dedup check that in the common case
+	// (no duplicate) returns nothing.
+	//
+	// unique_reference_id has no unique constraint (see migrations/001), so several
+	// rows can share one value. Resolve that by returning the most recent.
 	var job domain.Job
 	err := r.db.WithContext(ctx).
 		Where("unique_reference_id = ?", uniqueReferenceID).

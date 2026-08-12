@@ -23,8 +23,9 @@ type consoleStore struct {
 type JobFilter struct {
 	Name   string
 	Status string
-	// RefID filters to the job whose UniqueReferenceID exactly matches (the
-	// caller-supplied refID used for idempotency/dedup).
+	// RefID filters to jobs whose UniqueReferenceID exactly matches (the
+	// caller-supplied refID used for dedup). Since that column has no unique
+	// constraint, this can match more than one job.
 	RefID  string
 	From   *time.Time
 	To     *time.Time

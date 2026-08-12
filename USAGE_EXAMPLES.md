@@ -12,7 +12,7 @@ This guide shows how to use each **scherry** feature with concrete use cases. Fo
 - [Job → task splitting](#job--task-splitting)
 - [Task execution](#task-execution)
 - [Task distribution keys](#task-distribution-keys)
-- [Idempotent execution (refID)](#idempotent-execution-refid)
+- [Best-effort deduplication (refID)](#best-effort-deduplication-refid)
 - [CancelPrevious](#cancelprevious)
 - [Enabled callback](#enabled-callback)
 - [Retry policy and DLQ](#retry-policy-and-dlq)
@@ -211,9 +211,9 @@ tasks = append(tasks, scherry.TaskData{
 
 ---
 
-## Idempotent execution (refID)
+## Best-effort deduplication (refID)
 
-**Use case:** Safely retry an API call or webhook without creating duplicate job runs — payment reconciliation, webhook delivery, or form submission.
+**Use case:** Reduce duplicate job runs caused by a retried API call or webhook — payment reconciliation, webhook delivery, or form submission.
 
 ```go
 // Use a stable business key, not a random UUID, when deduplication matters.
@@ -222,10 +222,23 @@ refID := fmt.Sprintf("order-%s-export", orderID)
 err := svc.Trigger(ctx, "order_export", refID, map[string]interface{}{
     "order_id": orderID,
 })
-// Calling Trigger again with the same refID is a no-op — the first run wins.
+// A later Trigger with the same refID reuses the first run instead of starting a new one.
 ```
 
-The caller supplies `refID`. scherry deduplicates in `ExecuteJob`, so duplicate triggers from network retries or double-clicks do not spawn a second run.
+The caller supplies `refID`. Before creating a run, `ExecuteJob` looks for an existing job with the same `unique_reference_id` and reuses it if one is found. A trigger that is retried *after* the first one has been persisted — a network retry, a double-click, an at-least-once webhook redelivery — therefore reuses the original run.
+
+### Idempotency limitations
+
+This check is best-effort, not a guarantee. `ExecuteJob` performs the lookup and the insert as two separate statements, and `scherry_jobs.unique_reference_id` carries a plain index rather than a unique constraint. Two triggers with the same `refID` that overlap in time can both observe "no existing job" and both create a run.
+
+A database-level constraint is not currently available to close this window. `scherry_jobs` is `PARTITION BY RANGE (created_at)`, and PostgreSQL requires a unique index on a partitioned table to include every partition key column. `UNIQUE (unique_reference_id)` therefore cannot be created, and `UNIQUE (unique_reference_id, created_at)` would permit exactly the duplicates it is meant to prevent.
+
+Two consequences to design around:
+
+- Duplicate `unique_reference_id` rows can exist. Lookups resolve them by returning the most recent match (`ORDER BY created_at DESC`).
+- The History tab's reference ID filter can return more than one job for a single `refID`.
+
+Treat `refID` as duplicate suppression for sequentially retried triggers rather than as an idempotency key. If a duplicate run would be harmful, make the effect itself idempotent inside your `JobExecutor` and `TaskExecutor` — a unique constraint on your own tables, a conditional update, or a lock keyed by the business ID.
 
 ---
 
@@ -585,7 +598,7 @@ client.Enqueue(asynq.NewTask("scherry:retry-job", payload))
 | `JobExecutor` | Split one job into N parallel tasks |
 | `TaskExecutor` | Process one task unit |
 | `DistributionKey` | Per-customer ordering or consumer affinity |
-| `refID` | Idempotent triggers from APIs and webhooks |
+| `refID` | Best-effort duplicate suppression for triggers from APIs and webhooks |
 | `CancelPrevious` | Only-latest-run jobs (index rebuilds, syncs) |
 | `Enabled` | Feature flags and maintenance gates |
 | `Retry` + retry/DLQ topics | Transient failure handling |

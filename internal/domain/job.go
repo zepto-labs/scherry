@@ -13,11 +13,14 @@ import (
 )
 
 type Job struct {
-	ID                uuid.UUID    `gorm:"primaryKey;column:id;type:uuid"`
-	ParentJobID       *uuid.UUID   `gorm:"column:parent_job_id;type:uuid"`
-	Name              string       `gorm:"column:name;not null"`
-	Status            string       `gorm:"column:status;not null;default:'PENDING'"`
-	MaxRetries        int          `gorm:"column:max_retries;default:3"`
+	ID          uuid.UUID  `gorm:"primaryKey;column:id;type:uuid"`
+	ParentJobID *uuid.UUID `gorm:"column:parent_job_id;type:uuid"`
+	Name        string     `gorm:"column:name;not null"`
+	Status      string     `gorm:"column:status;not null;default:'PENDING'"`
+	MaxRetries  int        `gorm:"column:max_retries;default:3"`
+	// UniqueReferenceID is the caller-supplied dedup key. Despite the name it is
+	// not enforced as unique (see migrations/001), so several jobs can share one
+	// value and lookups resolve to the most recent.
 	UniqueReferenceID *string      `gorm:"column:unique_reference_id;type:varchar(255)"`
 	CreatedAt         time.Time    `gorm:"primaryKey;column:created_at;default:CURRENT_TIMESTAMP"`
 	UpdatedAt         time.Time    `gorm:"column:updated_at;default:CURRENT_TIMESTAMP"`

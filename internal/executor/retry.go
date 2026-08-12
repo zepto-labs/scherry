@@ -81,8 +81,11 @@ func (d *deps) prepareAndStreamRetry(ctx context.Context, originalJob *domain.Jo
 		return nil, 0, fmt.Errorf("no job config for %s", originalJob.Name)
 	}
 
-	// Idempotency: reuse a pending clone from a previous (possibly incomplete) attempt.
-	// Re-publish its tasks in batches in case publishing was interrupted mid-way.
+	// Reuse a pending clone from a previous (possibly incomplete) attempt rather
+	// than cloning twice, and re-publish its tasks in batches in case publishing
+	// was interrupted mid-way. Like the refID check in executeJob this is a
+	// best-effort read-then-insert with no unique constraint behind it, so
+	// concurrent retries of the same job can still each create a clone.
 	existingJob, err := d.repo.FindPendingJobByParentID(ctx, originalJob.ID)
 	if err != nil {
 		return nil, 0, fmt.Errorf("check pending clone: %w", err)
@@ -211,7 +214,7 @@ func (d *deps) startClonedJob(ctx context.Context, job *domain.Job) {
 }
 
 // RegisterRetryHandler registers an Asynq handler for retryJobType that
-// invokes RetryJob using the Asynq task ID as the idempotency ref.
+// invokes RetryJob using the Asynq task ID as the deduplication ref.
 func RegisterRetryHandler(mux *asynq.ServeMux, retryJobType string, repo repository.Repository, logger logging.Logger, jobs map[string]jobconfig.JobConfig) {
 	mux.HandleFunc(retryJobType, func(ctx context.Context, task *asynq.Task) error {
 		start := time.Now()

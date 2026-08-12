@@ -96,7 +96,7 @@ The key additions over raw Asynq are:
 - **Retry topic + DLQ** — Failed tasks are re-published to a dedicated retry topic (with configurable delay) rather than being held in Redis. Tasks that exhaust all retries are published to a DLQ topic for inspection.
 - **Manual / on-demand jobs** — `RegisterManual` + `Trigger` lets you fire a job from an HTTP handler or event without a cron schedule.
 - **Task distribution keys** — An optional Kafka partition key (`DistributionKey`) routes related tasks to the same partition/consumer, preserving ordering and enabling consumer affinity.
-- **Idempotent execution** — `ExecuteJob` deduplicates runs by a caller-supplied `refID`, so firing a job twice is safe.
+- **Duplicate-run suppression** — `ExecuteJob` reuses an existing run with the same caller-supplied `refID`, so a re-fired trigger does not start a second run. Best-effort rather than a guarantee: concurrent triggers sharing a `refID` can still both create a run (see [Idempotency limitations](USAGE_EXAMPLES.md#idempotency-limitations)).
 - **Execution hooks** — `OnTasksPublished`, `OnTaskStarted`, `OnTaskFinished`, `OnJobFinished` callbacks for Prometheus metrics or any custom instrumentation.
 - **History console** — A built-in web UI served on its own port, backed by Postgres, showing job/task progress, timings, retry lineage, and a one-click retry action.
 
@@ -117,7 +117,7 @@ The table below compares **scherry** against Asynq (which it wraps) and four oth
 | **Dead-letter queue (DLQ)** | ✓ (DLQ topic) | ✓ | ✓ | ✓ | ✗ |
 | **Task distribution / partition routing** | ✓ | ✗ | ✗ | ✗ | ✗ |
 | **Automatic job finalization** | ✓ | ✗ | ✗ | Partial | ✗ |
-| **Idempotent execution (dedup)** | ✓ (refID) | ✓ (unique option) | ✓ | ✗ | ✗ |
+| **Idempotent execution (dedup)** | Partial (refID, best-effort) | ✓ (unique option) | ✓ | ✗ | ✗ |
 | **Execution result persistence** | ✓ (Postgres) | ✗ | ✓ | ✓ (backend) | ✗ |
 | **Execution timing (start/finish/duration)** | ✓ | ✗ | ✓ | ✗ | ✗ |
 | **Built-in history web UI** | ✓ | ✓ (asynqmon) | ✓ | ✗ | ✗ |
@@ -138,7 +138,7 @@ The table below compares **scherry** against Asynq (which it wraps) and four oth
 
 ## Architecture
 
-![Architecture Diagram](docs/screenshots/schrrey_workflow.png)
+![Architecture Diagram](docs/screenshots/scherry_workflow.png)
 
 **Entry points**
 
@@ -169,7 +169,7 @@ A job is finalized (`COMPLETED`, `PARTIAL_FAILED`, or `FAILED`) once every one o
 **Execution and fan-out**
 - **Job → task splitting** — `JobExecutor.Execute` returns a `[]TaskData`; each item becomes one persisted task and one Kafka message
 - **Parallel task execution** — tasks are consumed by a dedicated Kafka consumer group per job; task throughput scales independently of the Redis/Asynq layer
-- **Idempotent execution** — `ExecuteJob` deduplicates by a caller-supplied `refID`; safe to call multiple times for the same logical run
+- **Duplicate-run suppression** — `ExecuteJob` reuses an existing run with the same caller-supplied `refID`; best-effort, so triggers that overlap in time can still both create a run (see [Idempotency limitations](USAGE_EXAMPLES.md#idempotency-limitations))
 - **Task distribution keys** — optional `DistributionKey` on each `TaskData` routes related tasks to the same Kafka partition, preserving ordering and enabling consumer affinity (e.g. all tasks for a given customer handled by one worker instance)
 - **Shared consumers** — `RegisterShared` explicitly couples two or more jobs onto one Kafka consumer, one producer, and one `TaskExecutor` when you want to pool Kafka resources instead of running an isolated consumer per job (see [Sharing a consumer across jobs](#sharing-a-consumer-across-jobs))
 
@@ -434,7 +434,7 @@ The landing tab. Shows aggregate metrics across all registered jobs for a select
 
 ### History tab
 
-A paginated table of every job run, newest first. Filter by job name, execution status, reference ID (the caller-supplied `refID` used for idempotency/dedup — exact match), and page size.
+A paginated table of every job run, newest first. Filter by job name, execution status, reference ID (the caller-supplied `refID` used for deduplication — exact match), and page size. Because `refID` is not enforced as unique, this filter can return more than one run for a single reference ID.
 
 Each row shows:
 - Job name and a short job ID
