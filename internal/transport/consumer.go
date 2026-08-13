@@ -131,6 +131,11 @@ func (r *ConsumerRegistry) StopAll() {
 		r.logger.Info("stopping consumer", "group", key.Group, "topic", key.Topic)
 		cancel()
 	}
+	for key, consumer := range r.consumers {
+		if err := consumer.reader.Close(); err != nil {
+			r.logger.Error("failed to close kafka reader", "group", key.Group, "topic", key.Topic, "error", err)
+		}
+	}
 	r.consumers = make(map[consumerKey]*taskConsumer)
 	r.cancel = make(map[consumerKey]context.CancelFunc)
 }
