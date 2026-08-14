@@ -131,6 +131,7 @@ func TestRetryTriggerJob(t *testing.T) {
 		repo.On("FindJobByID", mock.Anything, retried.ID).Return(retried, nil)
 		repo.On("GetTaskStatusSummary", mock.Anything, retried.ID).Return(repository.TaskStatusSummary{Total: 0}, nil)
 		repo.On("UpdateJob", mock.Anything, retried.ID, mock.Anything).Return(nil)
+		repo.On("UpdateJobIfStatus", mock.Anything, retried.ID, domain.JobStatusRunning, mock.Anything).Return(true, nil)
 		completed := &domain.Job{ID: retried.ID, Name: "job-a", Status: domain.JobStatusCompleted}
 		repo.On("FindJobWithTasksByUniqueReferenceID", mock.Anything, mock.Anything).
 			Return(completed, []domain.Task{}, nil).Once()

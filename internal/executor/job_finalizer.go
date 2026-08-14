@@ -63,32 +63,42 @@ func jobStatusToAction(status string) string {
 	}
 }
 
-func (d *deps) transitionJob(ctx context.Context, job *domain.Job, action string) error {
+// applyJobAction runs the in-memory FSM transition for action, validating it
+// against the job's current status and updating job.Status on success.
+func applyJobAction(ctx context.Context, job *domain.Job, action string) error {
 	switch action {
 	case domain.JobActionStart:
-		if err := job.Start(ctx); err != nil {
-			return fmt.Errorf("job %s transition %s: %w", job.ID, action, err)
-		}
+		return job.Start(ctx)
 	case domain.JobActionComplete:
-		if err := job.Complete(ctx); err != nil {
-			return fmt.Errorf("job %s transition %s: %w", job.ID, action, err)
-		}
+		return job.Complete(ctx)
 	case domain.JobActionFail:
-		if err := job.Fail(ctx); err != nil {
-			return fmt.Errorf("job %s transition %s: %w", job.ID, action, err)
-		}
+		return job.Fail(ctx)
 	case domain.JobActionPartialFail:
-		if err := job.PartialFail(ctx); err != nil {
-			return fmt.Errorf("job %s transition %s: %w", job.ID, action, err)
-		}
+		return job.PartialFail(ctx)
 	case domain.JobActionCancel:
-		if err := job.Cancel(ctx); err != nil {
-			return fmt.Errorf("job %s transition %s: %w", job.ID, action, err)
-		}
+		return job.Cancel(ctx)
 	default:
 		return fmt.Errorf("unknown job action: %s", action)
 	}
+}
+
+func (d *deps) transitionJob(ctx context.Context, job *domain.Job, action string) error {
+	if err := applyJobAction(ctx, job, action); err != nil {
+		return fmt.Errorf("job %s transition %s: %w", job.ID, action, err)
+	}
 	return d.repo.UpdateJob(ctx, job.ID, jobTimingUpdates(job, action))
+}
+
+// finalizeRunningJob transitions a RUNNING job to its terminal state and
+// persists the change only while the row is still RUNNING. It returns true iff
+// this call performed the transition, so a caller can fire OnJobFinished exactly
+// once even when several finalizers (an overlapping completion-check tick and
+// the empty-job path, say) race on the same job.
+func (d *deps) finalizeRunningJob(ctx context.Context, job *domain.Job, action string) (bool, error) {
+	if err := applyJobAction(ctx, job, action); err != nil {
+		return false, fmt.Errorf("job %s transition %s: %w", job.ID, action, err)
+	}
+	return d.repo.UpdateJobIfStatus(ctx, job.ID, domain.JobStatusRunning, jobTimingUpdates(job, action))
 }
 
 // jobTimingUpdates builds the persisted column set for a job transition:
@@ -204,8 +214,19 @@ func (d *deps) maybeFinalizeJob(ctx context.Context, jobID uuid.UUID) error {
 	if action == "" {
 		return fmt.Errorf("unsupported terminal job status: %s", status)
 	}
-	if err := d.transitionJob(ctx, job, action); err != nil {
+	// The RUNNING check above is only a fast path: it and GetTaskStatusSummary
+	// are separate reads, so two finalizers (an overlapping completion-check tick
+	// and the empty-job path, say) can both reach here for the same job. The
+	// compare-and-set below is what makes finalization exactly-once — only the
+	// caller that actually transitions the row RUNNING -> terminal fires
+	// OnJobFinished.
+	finalized, err := d.finalizeRunningJob(ctx, job, action)
+	if err != nil {
 		return err
+	}
+	if !finalized {
+		d.logger.Info("job already finalized by a concurrent check", "job_id", job.ID)
+		return nil
 	}
 
 	refID := ""
