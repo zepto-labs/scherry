@@ -112,6 +112,11 @@ func (m *MockRepository) UpdateJob(ctx context.Context, jobID uuid.UUID, updates
 	return args.Error(0)
 }
 
+func (m *MockRepository) UpdateJobIfStatus(ctx context.Context, jobID uuid.UUID, expectedStatus string, updates map[string]interface{}) (bool, error) {
+	args := m.Called(ctx, jobID, expectedStatus, updates)
+	return args.Bool(0), args.Error(1)
+}
+
 func (m *MockRepository) UpdateTask(ctx context.Context, taskID uuid.UUID, updates map[string]interface{}) error {
 	args := m.Called(ctx, taskID, updates)
 	return args.Error(0)

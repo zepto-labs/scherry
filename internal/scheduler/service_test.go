@@ -390,6 +390,7 @@ func TestExecuteJob(t *testing.T) {
 		repo.On("GetTaskStatusSummary", mock.Anything, job.ID).Return(
 			repository.TaskStatusSummary{Total: 0, Completed: 0, NonTerminal: 0}, nil)
 		repo.On("UpdateJob", mock.Anything, job.ID, mock.Anything).Return(nil)
+		repo.On("UpdateJobIfStatus", mock.Anything, job.ID, domain.JobStatusRunning, mock.Anything).Return(true, nil)
 
 		assert.NoError(t, svc.ExecuteJob(context.Background(), "test-job", "ref", nil))
 		assert.Equal(t, domain.JobStatusCompleted, job.Status)
@@ -489,6 +490,7 @@ func TestRetryJob(t *testing.T) {
 		pub.On("PublishTasks", mock.Anything, mock.Anything, "topic").Return(nil)
 		// startClonedJob uses the known clonedID returned by FindPendingJobByParentID
 		repo.On("UpdateJob", mock.Anything, clonedID, mock.Anything).Return(nil)
+		repo.On("UpdateJobIfStatus", mock.Anything, clonedID, domain.JobStatusRunning, mock.Anything).Return(true, nil)
 		repo.On("GetTaskStatusSummary", mock.Anything, clonedID).Return(
 			repository.TaskStatusSummary{Total: 1, NonTerminal: 1}, nil)
 
@@ -515,6 +517,7 @@ func TestRetryJob(t *testing.T) {
 		repo.On("GetTaskStatusSummary", mock.Anything, clonedID).Return(repository.TaskStatusSummary{Total: 0}, nil).Twice()
 		repo.On("FindJobByID", mock.Anything, clonedID).Return(cloned, nil)
 		repo.On("UpdateJob", mock.Anything, clonedID, mock.Anything).Return(nil)
+		repo.On("UpdateJobIfStatus", mock.Anything, clonedID, domain.JobStatusRunning, mock.Anything).Return(true, nil)
 
 		result, err := svc.RetryJob(context.Background(), originalID, false, "ref")
 		assert.NoError(t, err)

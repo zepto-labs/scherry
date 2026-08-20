@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/mock"
 
 	"github.com/zepto-labs/scherry/internal/domain"
+	"github.com/zepto-labs/scherry/internal/jobconfig"
 	"github.com/zepto-labs/scherry/internal/logging"
 	"github.com/zepto-labs/scherry/internal/repository"
 	"github.com/zepto-labs/scherry/internal/testutil"
@@ -155,7 +156,7 @@ func TestMaybeFinalizeJob(t *testing.T) {
 		repo.On("FindJobByID", mock.Anything, jobID).Return(job, nil)
 		repo.On("GetTaskStatusSummary", mock.Anything, jobID).Return(
 			repository.TaskStatusSummary{Total: 1, Completed: 1, NonTerminal: 0}, nil)
-		repo.On("UpdateJob", mock.Anything, jobID, mock.Anything).Return(nil)
+		repo.On("UpdateJobIfStatus", mock.Anything, jobID, domain.JobStatusRunning, mock.Anything).Return(true, nil)
 
 		assert.NoError(t, d.maybeFinalizeJob(context.Background(), jobID))
 		assert.Equal(t, domain.JobStatusCompleted, job.Status)
@@ -182,7 +183,7 @@ func TestMaybeFinalizeJob(t *testing.T) {
 		repo.On("FindJobByID", mock.Anything, jobID).Return(failedJob, nil)
 		repo.On("GetTaskStatusSummary", mock.Anything, jobID).Return(
 			repository.TaskStatusSummary{Total: 2, Completed: 0, NonTerminal: 0}, nil)
-		repo.On("UpdateJob", mock.Anything, jobID, mock.Anything).Return(nil)
+		repo.On("UpdateJobIfStatus", mock.Anything, jobID, domain.JobStatusRunning, mock.Anything).Return(true, nil)
 
 		assert.NoError(t, d.maybeFinalizeJob(context.Background(), jobID))
 		assert.Equal(t, domain.JobStatusFailed, failedJob.Status)
@@ -196,7 +197,7 @@ func TestMaybeFinalizeJob(t *testing.T) {
 		repo.On("FindJobByID", mock.Anything, jobID).Return(partialJob, nil)
 		repo.On("GetTaskStatusSummary", mock.Anything, jobID).Return(
 			repository.TaskStatusSummary{Total: 4, Completed: 2, NonTerminal: 0}, nil)
-		repo.On("UpdateJob", mock.Anything, jobID, mock.Anything).Return(nil)
+		repo.On("UpdateJobIfStatus", mock.Anything, jobID, domain.JobStatusRunning, mock.Anything).Return(true, nil)
 
 		assert.NoError(t, d.maybeFinalizeJob(context.Background(), jobID))
 		assert.Equal(t, domain.JobStatusPartialFailed, partialJob.Status)
@@ -217,8 +218,8 @@ func TestCheckJobCompletions(t *testing.T) {
 			repository.TaskStatusSummary{Total: 1, Completed: 1, NonTerminal: 0}, nil)
 		repo.On("GetTaskStatusSummary", mock.Anything, jobB.ID).Return(
 			repository.TaskStatusSummary{Total: 1, Completed: 0, NonTerminal: 0}, nil)
-		repo.On("UpdateJob", mock.Anything, jobA.ID, mock.Anything).Return(nil)
-		repo.On("UpdateJob", mock.Anything, jobB.ID, mock.Anything).Return(nil)
+		repo.On("UpdateJobIfStatus", mock.Anything, jobA.ID, domain.JobStatusRunning, mock.Anything).Return(true, nil)
+		repo.On("UpdateJobIfStatus", mock.Anything, jobB.ID, domain.JobStatusRunning, mock.Anything).Return(true, nil)
 
 		assert.NoError(t, CheckJobCompletions(context.Background(), repo, logging.NopLogger{}, nil, "test-job"))
 		assert.Equal(t, domain.JobStatusCompleted, jobA.Status)
@@ -351,5 +352,40 @@ func TestTransitionJob(t *testing.T) {
 
 		err := d.transitionJob(context.Background(), job, "not-a-real-action")
 		assert.ErrorContains(t, err, "unknown job action")
+	})
+}
+
+// TestMaybeFinalizeJobExactlyOnce guards the exactly-once completion guarantee:
+// the RUNNING check and the task-summary read in maybeFinalizeJob are separate,
+// so two finalizers (an overlapping completion-check tick and the empty-job
+// path, say) can both reach the terminal transition for the same job. Only the
+// one whose compare-and-set actually moves the row out of RUNNING may fire
+// OnJobFinished.
+func TestMaybeFinalizeJobExactlyOnce(t *testing.T) {
+	jobID := uuid.New()
+	allDone := repository.TaskStatusSummary{Total: 1, Completed: 1, NonTerminal: 0}
+
+	setup := func(casWon bool, calls *int) *deps {
+		jobs := map[string]jobconfig.JobConfig{"test-job": {Name: "test-job", Hooks: jobconfig.Hooks{
+			OnJobFinished: func(context.Context, string, string, string, time.Duration) { *calls++ },
+		}}}
+		repo := &testutil.MockRepository{}
+		job := &domain.Job{ID: jobID, Name: "test-job", Status: domain.JobStatusRunning}
+		repo.On("FindJobByID", mock.Anything, jobID).Return(job, nil)
+		repo.On("GetTaskStatusSummary", mock.Anything, jobID).Return(allDone, nil)
+		repo.On("UpdateJobIfStatus", mock.Anything, jobID, domain.JobStatusRunning, mock.Anything).Return(casWon, nil)
+		return newDeps(repo, jobs)
+	}
+
+	t.Run("the finalizer that wins the compare-and-set fires the hook once", func(t *testing.T) {
+		calls := 0
+		assert.NoError(t, setup(true, &calls).maybeFinalizeJob(context.Background(), jobID))
+		assert.Equal(t, 1, calls)
+	})
+
+	t.Run("a finalizer that loses the compare-and-set does not fire the hook", func(t *testing.T) {
+		calls := 0
+		assert.NoError(t, setup(false, &calls).maybeFinalizeJob(context.Background(), jobID))
+		assert.Equal(t, 0, calls, "OnJobFinished must not fire when another finalizer already transitioned the job")
 	})
 }

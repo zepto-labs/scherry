@@ -50,6 +50,11 @@ type Repository interface {
 	TerminateJob(ctx context.Context, jobID uuid.UUID) error
 	UpdateJobStatus(ctx context.Context, jobID uuid.UUID, status string) error
 	UpdateJob(ctx context.Context, jobID uuid.UUID, updates map[string]interface{}) error
+	// UpdateJobIfStatus applies updates only while the job's status equals
+	// expectedStatus, returning true iff a row was updated. It is a
+	// compare-and-set primitive so that concurrent callers (e.g. two overlapping
+	// completion-check ticks) can't both transition the same job.
+	UpdateJobIfStatus(ctx context.Context, jobID uuid.UUID, expectedStatus string, updates map[string]interface{}) (bool, error)
 	UpdateTask(ctx context.Context, taskID uuid.UUID, updates map[string]interface{}) error
 	CreateJobAndTasks(ctx context.Context, job *domain.Job, tasks []domain.Task) (*domain.Job, []domain.Task, error)
 	// DB returns the underlying *gorm.DB connection, or nil if this
@@ -223,6 +228,23 @@ func (r *repository) UpdateJob(ctx context.Context, jobID uuid.UUID, updates map
 	}
 	updates["updated_at"] = time.Now()
 	return r.db.WithContext(ctx).Model(&domain.Job{}).Where("id = ?", jobID).Updates(updates).Error
+}
+
+// UpdateJobIfStatus applies updates only while the job's status equals
+// expectedStatus, returning true iff a row was updated. The status guard runs in
+// the same UPDATE statement, so it is atomic against concurrent writers.
+func (r *repository) UpdateJobIfStatus(ctx context.Context, jobID uuid.UUID, expectedStatus string, updates map[string]interface{}) (bool, error) {
+	if len(updates) == 0 {
+		return false, nil
+	}
+	updates["updated_at"] = time.Now()
+	res := r.db.WithContext(ctx).Model(&domain.Job{}).
+		Where("id = ? AND status = ?", jobID, expectedStatus).
+		Updates(updates)
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected == 1, nil
 }
 
 // defaultCompletionCheckBatchSize is the fallback limit used when a caller

@@ -261,6 +261,7 @@ func TestConsoleHandlerRetryAndTerminate(t *testing.T) {
 		repo.On("FindTasksByJobIDAndStatusesBatch", mock.Anything, jobID,
 			[]string{domain.TaskStatusMaxRetriesExhausted}, -1, repository.TaskInsertBatchSize).Return([]domain.Task{}, nil).Once()
 		repo.On("UpdateJob", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+		repo.On("UpdateJobIfStatus", mock.Anything, mock.Anything, domain.JobStatusRunning, mock.Anything).Return(true, nil)
 		repo.On("GetTaskStatusSummary", mock.Anything, mock.Anything).Return(
 			repository.TaskStatusSummary{Total: 0}, nil).Once()
 
@@ -327,6 +328,7 @@ func TestConsoleHandlerRetryAndTerminate(t *testing.T) {
 		triggerRepo.On("FindJobByID", mock.Anything, retriedID).Return(retried, nil)
 		triggerRepo.On("GetTaskStatusSummary", mock.Anything, retriedID).Return(repository.TaskStatusSummary{Total: 0}, nil)
 		triggerRepo.On("UpdateJob", mock.Anything, retriedID, mock.Anything).Return(nil)
+		triggerRepo.On("UpdateJobIfStatus", mock.Anything, retriedID, domain.JobStatusRunning, mock.Anything).Return(true, nil)
 		triggerRepo.On("FindJobWithTasksByUniqueReferenceID", mock.Anything, mock.Anything).
 			Return(completed, []domain.Task{}, nil).Once()
 

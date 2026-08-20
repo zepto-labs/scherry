@@ -65,6 +65,7 @@ func TestRegisterRetryHandler(t *testing.T) {
 		repo.On("FindTasksByJobIDAndStatusesBatch", mock.Anything, originalID,
 			[]string{domain.TaskStatusMaxRetriesExhausted}, -1, retryBatchSize).Return([]domain.Task{}, nil)
 		repo.On("UpdateJob", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+		repo.On("UpdateJobIfStatus", mock.Anything, mock.Anything, domain.JobStatusRunning, mock.Anything).Return(true, nil)
 		repo.On("GetTaskStatusSummary", mock.Anything, mock.Anything).Return(
 			repository.TaskStatusSummary{Total: 0}, nil)
 
@@ -163,6 +164,7 @@ func TestRetryJob(t *testing.T) {
 		repo.On("GetTaskStatusSummary", mock.Anything, clonedID).Return(repository.TaskStatusSummary{Total: 0}, nil).Twice()
 		repo.On("FindJobByID", mock.Anything, clonedID).Return(cloned, nil).Once()
 		repo.On("UpdateJob", mock.Anything, clonedID, mock.Anything).Return(nil)
+		repo.On("UpdateJobIfStatus", mock.Anything, clonedID, domain.JobStatusRunning, mock.Anything).Return(true, nil)
 
 		result, err := RetryJob(context.Background(), repo, logging.NopLogger{}, jobs, originalID, false, "ref")
 		assert.NoError(t, err)
