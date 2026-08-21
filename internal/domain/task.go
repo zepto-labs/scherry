@@ -3,6 +3,7 @@ package domain
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -44,6 +45,13 @@ func (t *Task) stateMachine() *fsm.FSM {
 func (t *Task) UpdateStatus(status string) {
 	t.Status = status
 	t.UpdatedAt = time.Now()
+}
+
+// IsTerminal reports whether the task has reached a settled state from which no
+// further execution is expected. A FAILED task is not terminal because it may
+// still be retried.
+func (t *Task) IsTerminal() bool {
+	return slices.Contains(TerminalTaskStates, t.Status)
 }
 
 func (t *Task) Start(ctx context.Context) error {

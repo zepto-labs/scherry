@@ -72,6 +72,41 @@ func TestExecuteTaskRetryAndDLQ(t *testing.T) {
 	})
 }
 
+func TestExecuteTaskIdempotentOnRedelivery(t *testing.T) {
+	// Kafka delivers at least once, so a task message can be redelivered after the
+	// task has already settled. Re-running it would attempt an invalid transition
+	// ("start" on a COMPLETED task) and fail the message; the executor must instead
+	// treat an already-terminal task as an idempotent no-op.
+	for _, status := range []string{
+		domain.TaskStatusCompleted,
+		domain.TaskStatusCancelled,
+		domain.TaskStatusRejected,
+		domain.TaskStatusMaxRetriesExhausted,
+	} {
+		t.Run("skips redelivered "+status+" task", func(t *testing.T) {
+			repo := &testutil.MockRepository{}
+			taskExec := &testutil.MockTaskExecutor{}
+			d := newDeps(repo, map[string]jobconfig.JobConfig{
+				"test-job": {
+					Name: "test-job", TaskExecutor: taskExec, Hooks: jobconfig.NopHooks(),
+				},
+			})
+
+			task, job := testutil.NewTestTaskPair()
+			task.Status = status                 // this task already finished
+			job.Status = domain.JobStatusRunning // but the job is still executing
+			payload := testutil.MustMarshal(task)
+
+			repo.On("FindTaskWithJob", mock.Anything, task.ID).Return(task, job, nil)
+
+			assert.NoError(t, d.executeTask(context.Background(), payload))
+			// No re-execution and no state writes for an already-terminal task.
+			taskExec.AssertNotCalled(t, "Execute", mock.Anything, mock.Anything)
+			repo.AssertNotCalled(t, "UpdateTask", mock.Anything, mock.Anything, mock.Anything)
+		})
+	}
+}
+
 func TestIsNoTransition(t *testing.T) {
 	t.Run("true for a same-state self transition", func(t *testing.T) {
 		task := &domain.Task{Status: domain.TaskStatusRunning}
