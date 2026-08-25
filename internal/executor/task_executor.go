@@ -50,6 +50,16 @@ func (d *deps) executeTask(ctx context.Context, message []byte) error {
 		return nil
 	}
 
+	// A task message can be redelivered after the task has already settled (Kafka
+	// delivers at least once). Re-running it would attempt an invalid state
+	// transition (e.g. "start" on a COMPLETED task) and fail the message, so treat
+	// an already-terminal task as an idempotent no-op.
+	if task.IsTerminal() {
+		d.logger.Info("skip already-finalized task", "job_id", job.ID, "task_id", task.ID, "task_status", task.Status)
+		jobCfg.Hooks.OnTaskFinished(ctx, job.Name, task.ID.String(), "skipped", time.Since(start))
+		return nil
+	}
+
 	if err := d.startTaskExecution(ctx, task); err != nil {
 		jobCfg.Hooks.OnTaskFinished(ctx, job.Name, task.ID.String(), "error", time.Since(start))
 		return err

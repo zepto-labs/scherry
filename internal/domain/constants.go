@@ -48,3 +48,13 @@ var TerminalJobStates = []string{
 	JobStatusRejected,
 	JobStatusCancelled,
 }
+
+// TerminalTaskStates are the settled task states from which no further execution
+// is expected. TaskStatusFailed is intentionally excluded because a failed task
+// is retryable (FAILED -> PENDING) and is not a settled outcome.
+var TerminalTaskStates = []string{
+	TaskStatusCompleted,
+	TaskStatusRejected,
+	TaskStatusCancelled,
+	TaskStatusMaxRetriesExhausted,
+}
