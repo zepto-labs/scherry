@@ -115,6 +115,35 @@ func TestTaskConsumerProcessRetryMessage(t *testing.T) {
 		assert.NoError(t, err)
 		assert.GreaterOrEqual(t, time.Since(start), 15*time.Millisecond)
 	})
+
+	t.Run("returns promptly when the context is cancelled while waiting", func(t *testing.T) {
+		// A far-future ProcessAfter means the wait would block for an hour if
+		// it ignored cancellation; the test must return well before that.
+		taskExec := &testutil.MockTaskExecutor{}
+		runner := execRunner{repo: &testutil.MockRepository{}, jobs: map[string]jobconfig.JobConfig{
+			"test-job": {Name: "test-job", TaskExecutor: taskExec, Hooks: jobconfig.NopHooks()},
+		}}
+		consumer := newTaskConsumer(&mockMessageReader{}, runner, logging.NopLogger{}, true)
+
+		task, _ := testutil.NewTestTaskPair()
+		retryMsg := RetryMessage{Task: *task, ProcessAfter: time.Now().Add(time.Hour)}
+		payload := testutil.MustMarshal(retryMsg)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		done := make(chan error, 1)
+		go func() { done <- consumer.processRetryMessage(ctx, payload) }()
+
+		select {
+		case err := <-done:
+			assert.ErrorIs(t, err, context.Canceled)
+		case <-time.After(time.Second):
+			t.Fatal("processRetryMessage did not return after context cancellation")
+		}
+		// The task must not have been executed after the wait was cancelled.
+		taskExec.AssertNotCalled(t, "Execute", mock.Anything, mock.Anything)
+	})
 }
 
 func TestConsumerRegistryStartAndStopAll(t *testing.T) {
