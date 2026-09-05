@@ -2,6 +2,7 @@ package transport
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -30,6 +31,8 @@ func (r execRunner) ExecuteTask(ctx context.Context, message []byte) error {
 
 type mockMessageReader struct {
 	mock.Mock
+	closeErr   error
+	closeCalls int
 }
 
 func (m *mockMessageReader) FetchMessage(ctx context.Context) (kafkago.Message, error) {
@@ -42,7 +45,10 @@ func (m *mockMessageReader) CommitMessages(ctx context.Context, msgs ...kafkago.
 	return args.Error(0)
 }
 
-func (m *mockMessageReader) Close() error { return nil }
+func (m *mockMessageReader) Close() error {
+	m.closeCalls++
+	return m.closeErr
+}
 
 func TestTaskConsumerProcessMessage(t *testing.T) {
 	t.Run("main consumer executes the task directly", func(t *testing.T) {
@@ -143,6 +149,40 @@ func TestConsumerRegistryStartAndStopAll(t *testing.T) {
 
 	t.Run("stopAll cancels every consumer and clears the registry", func(t *testing.T) {
 		registry.StopAll()
+		assert.Equal(t, 0, registry.Len())
+	})
+}
+
+func TestConsumerRegistryStopAllClosesReaders(t *testing.T) {
+	t.Run("closes every registered reader", func(t *testing.T) {
+		registry := NewConsumerRegistry(logging.NopLogger{})
+		runner := execRunner{repo: &testutil.MockRepository{}}
+		ctx := context.Background()
+
+		readers := []*mockMessageReader{{}, {}}
+		topics := []string{"topic-a", "topic-b"}
+		for i, reader := range readers {
+			reader.On("FetchMessage", mock.Anything).Return(kafkago.Message{}, context.Canceled).Maybe()
+			assert.NoError(t, registry.Start(ctx, reader, runner, false, "group", topics[i]))
+		}
+
+		registry.StopAll()
+
+		assert.Equal(t, 1, readers[0].closeCalls)
+		assert.Equal(t, 1, readers[1].closeCalls)
+		assert.Equal(t, 0, registry.Len())
+	})
+
+	t.Run("clears the registry when a reader close fails", func(t *testing.T) {
+		registry := NewConsumerRegistry(logging.NopLogger{})
+		runner := execRunner{repo: &testutil.MockRepository{}}
+		reader := &mockMessageReader{closeErr: errors.New("close failed")}
+		reader.On("FetchMessage", mock.Anything).Return(kafkago.Message{}, context.Canceled).Maybe()
+
+		assert.NoError(t, registry.Start(context.Background(), reader, runner, false, "group", "topic"))
+		registry.StopAll()
+
+		assert.Equal(t, 1, reader.closeCalls)
 		assert.Equal(t, 0, registry.Len())
 	})
 }
