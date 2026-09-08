@@ -75,7 +75,17 @@ func (c *taskConsumer) processRetryMessage(ctx context.Context, value []byte) er
 	wait := time.Until(retryMsg.ProcessAfter)
 	if wait > 0 {
 		c.logger.Info("waiting before retry", "task_id", retryMsg.Task.ID, "wait", wait)
-		time.Sleep(wait)
+		timer := time.NewTimer(wait)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			// Shutdown was requested while waiting for the retry delay to
+			// elapse. Return without committing so the message is redelivered
+			// and retried by another consumer, instead of blocking the
+			// shutdown for the full (possibly large) retry delay.
+			return ctx.Err()
+		case <-timer.C:
+		}
 	}
 
 	payload, err := json.Marshal(retryMsg.Task)
