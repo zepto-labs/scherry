@@ -107,6 +107,50 @@ func TestExecuteTaskIdempotentOnRedelivery(t *testing.T) {
 	}
 }
 
+func TestExecuteTaskIdempotentWhenJobAlsoFinalized(t *testing.T) {
+	// Kafka delivers at least once, so a task message can be redelivered after
+	// BOTH the task and its job have settled — e.g. the job was finalized by the
+	// JobCompletionCron between the task completing and the duplicate arriving.
+	// An already-terminal task must stay an idempotent no-op regardless of the
+	// job's state: it must never be re-executed and its status must never be
+	// overwritten with the job's status (which, for PARTIAL_FAILED, is not even a
+	// valid task status).
+	terminalJobStatuses := []string{
+		domain.JobStatusCompleted,
+		domain.JobStatusPartialFailed,
+		domain.JobStatusFailed,
+		domain.JobStatusCancelled,
+		domain.JobStatusRejected,
+	}
+	for _, jobStatus := range terminalJobStatuses {
+		t.Run("skips redelivered COMPLETED task under "+jobStatus+" job", func(t *testing.T) {
+			repo := &testutil.MockRepository{}
+			taskExec := &testutil.MockTaskExecutor{}
+			d := newDeps(repo, map[string]jobconfig.JobConfig{
+				"test-job": {
+					Name: "test-job", TaskExecutor: taskExec, Hooks: jobconfig.NopHooks(),
+				},
+			})
+
+			task, job := testutil.NewTestTaskPair()
+			task.Status = domain.TaskStatusCompleted // this task already finished
+			job.Status = jobStatus                   // and the job has since finalized
+			payload := testutil.MustMarshal(task)
+
+			repo.On("FindTaskWithJob", mock.Anything, task.ID).Return(task, job, nil)
+			// Allow (but do not require) the buggy write so the failure is a clean
+			// AssertNotCalled rather than an unexpected-call panic.
+			repo.On("UpdateTasksStatus", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+
+			assert.NoError(t, d.executeTask(context.Background(), payload))
+
+			// A settled task must not be re-executed nor have its status rewritten.
+			taskExec.AssertNotCalled(t, "Execute", mock.Anything, mock.Anything)
+			repo.AssertNotCalled(t, "UpdateTasksStatus", mock.Anything, mock.Anything, mock.Anything)
+		})
+	}
+}
+
 func TestIsNoTransition(t *testing.T) {
 	t.Run("true for a same-state self transition", func(t *testing.T) {
 		task := &domain.Task{Status: domain.TaskStatusRunning}

@@ -43,19 +43,26 @@ func (d *deps) executeTask(ctx context.Context, message []byte) error {
 		return fmt.Errorf("no job config registered for job type: %s", job.Name)
 	}
 
-	if !job.IsExecutionPending() {
-		d.logger.Info("skip task for non-pending job", "job_id", job.ID, "task_id", task.ID, "job_status", job.Status)
-		d.updateTasksStatus(ctx, []domain.Task{*task}, job.Status)
-		jobCfg.Hooks.OnTaskFinished(ctx, job.Name, task.ID.String(), "skipped", time.Since(start))
-		return nil
-	}
-
 	// A task message can be redelivered after the task has already settled (Kafka
 	// delivers at least once). Re-running it would attempt an invalid state
 	// transition (e.g. "start" on a COMPLETED task) and fail the message, so treat
 	// an already-terminal task as an idempotent no-op.
+	//
+	// This guard must run before the non-pending-job branch below: by the time a
+	// duplicate arrives the job itself may have finalized (the JobCompletionCron
+	// can settle it once every task is terminal), and that branch would otherwise
+	// overwrite the settled task's status with the job's status — including
+	// PARTIAL_FAILED, which is not a valid task status — silently corrupting the
+	// task record on a redelivery that should have been a no-op.
 	if task.IsTerminal() {
 		d.logger.Info("skip already-finalized task", "job_id", job.ID, "task_id", task.ID, "task_status", task.Status)
+		jobCfg.Hooks.OnTaskFinished(ctx, job.Name, task.ID.String(), "skipped", time.Since(start))
+		return nil
+	}
+
+	if !job.IsExecutionPending() {
+		d.logger.Info("skip task for non-pending job", "job_id", job.ID, "task_id", task.ID, "job_status", job.Status)
+		d.updateTasksStatus(ctx, []domain.Task{*task}, job.Status)
 		jobCfg.Hooks.OnTaskFinished(ctx, job.Name, task.ID.String(), "skipped", time.Since(start))
 		return nil
 	}
