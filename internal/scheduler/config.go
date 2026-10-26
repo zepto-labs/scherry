@@ -8,6 +8,7 @@ package scheduler
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"strings"
@@ -35,13 +36,17 @@ type RedisConfig struct {
 	Addr     string
 	Password string
 	DB       int
+	// TLSConfig enables TLS connections to Redis (e.g. managed Redis or
+	// ElastiCache with encryption in transit). Nil means plaintext.
+	TLSConfig *tls.Config
 }
 
 func (r RedisConfig) AsynqClientOpt() asynq.RedisClientOpt {
 	return asynq.RedisClientOpt{
-		Addr:     r.Addr,
-		Password: r.Password,
-		DB:       r.DB,
+		Addr:      r.Addr,
+		Password:  r.Password,
+		DB:        r.DB,
+		TLSConfig: r.TLSConfig,
 	}
 }
 

@@ -1,6 +1,7 @@
 package scheduler
 
 import (
+	"crypto/tls"
 	"testing"
 
 	"github.com/hibiken/asynq"
@@ -15,6 +16,14 @@ func TestRedisConfigAsynqClientOpt(t *testing.T) {
 	opt := cfg.AsynqClientOpt()
 
 	assert.Equal(t, asynq.RedisClientOpt{Addr: "localhost:6379", Password: "secret", DB: 2}, opt)
+}
+
+func TestRedisConfigAsynqClientOptWithTLS(t *testing.T) {
+	tlsCfg := &tls.Config{ServerName: "redis.example.com"}
+	cfg := RedisConfig{Addr: "redis.example.com:6379", Password: "secret", DB: 0, TLSConfig: tlsCfg}
+	opt := cfg.AsynqClientOpt()
+
+	assert.Equal(t, tlsCfg, opt.TLSConfig)
 }
 
 func TestBuildDSN(t *testing.T) {

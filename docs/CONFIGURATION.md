@@ -25,6 +25,7 @@ Passed to `scherry.New`.
 | `Addr` | `string` | — | **Yes** | Redis address (`host:port`). |
 | `Password` | `string` | `""` | No | Redis password. |
 | `DB` | `int` | `0` | No | Redis database index (must be ≥ 0). |
+| `TLSConfig` | `*tls.Config` | `nil` | No | TLS configuration for the Redis connection (e.g. managed Redis / ElastiCache with encryption in transit). `nil` means plaintext. |
 
 ### `DatabaseConfig`
 
