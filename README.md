@@ -50,6 +50,7 @@ Unlike single-level task queues that leave you guessing when a batch run stalls 
   - [ConsumerConfig](#consumerconfig--kafkagoreaderconfig)
   - [WriterConfig](#writerconfig--kafkagowriter)
   - [TLS and SASL](#tls-and-sasl-eg-confluent-cloud-aws-msk)
+- [Redis TLS](#redis-tls)
 - [History console](#history-console)
   - [Overview tab](#overview-tab)
   - [History tab](#history-tab)
@@ -393,6 +394,27 @@ Kafka: scherry.KafkaConfig{
     },
 },
 ```
+
+## Redis TLS
+
+The Redis connection used by Asynq for cron triggering can be secured with TLS via the optional `TLSConfig` field on `scherry.RedisConfig` (useful for managed Redis services such as AWS ElastiCache or Aiven with encryption in transit):
+
+```go
+import "crypto/tls"
+
+svc, err := scherry.New(scherry.Config{
+    ServiceName: "my-service",
+    Logger:      scherry.NewSlogLogger(slog.Default()),
+    Redis: scherry.RedisConfig{
+        Addr:      "my-redis.example.com:6379",
+        Password:  "secret",
+        TLSConfig: &tls.Config{ServerName: "my-redis.example.com"},
+    },
+    // ...
+})
+```
+
+When `TLSConfig` is `nil` (the default), the connection is plaintext.
 
 ## History console
 
